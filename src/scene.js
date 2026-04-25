@@ -4,6 +4,7 @@
 
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+import { computeViewportFit, DEFAULT_CAMERA_DISTANCE } from './viewport-fit.js';
 
 // Scene rendered transparent so the CSS gradient background shows through.
 // Fog tint matches the bottom of the gradient for cohesion.
@@ -22,13 +23,19 @@ export function createScene(mount) {
   scene.background = null; // transparent — CSS gradient shows through
   scene.fog = new THREE.Fog(FOG_TINT, 14, 32);
 
-  const camera = new THREE.PerspectiveCamera(
-    45,
-    mount.clientWidth / Math.max(1, mount.clientHeight),
-    0.1,
-    100,
-  );
-  camera.position.set(0, 0, 12);
+  // Phase M2: pull FOV + visible-volume bounds from a deterministic helper
+  // so the same numbers feed the position generator and the camera. On
+  // portrait phones this widens the FOV (45° → up to ~65°) so the scene
+  // reads instead of cropping out half the balls.
+  const cameraDistance = DEFAULT_CAMERA_DISTANCE;
+  let fit = computeViewportFit({
+    width: mount.clientWidth,
+    height: mount.clientHeight,
+    cameraDistance,
+  });
+
+  const camera = new THREE.PerspectiveCamera(fit.fov, fit.aspect, 0.1, 100);
+  camera.position.set(0, 0, cameraDistance);
   camera.lookAt(0, 0, 0);
 
   const renderer = new THREE.WebGLRenderer({
@@ -152,12 +159,27 @@ export function createScene(mount) {
   function onResize() {
     const w = mount.clientWidth;
     const h = mount.clientHeight;
-    camera.aspect = w / Math.max(1, h);
+    fit = computeViewportFit({ width: w, height: h, cameraDistance });
+    camera.aspect = fit.aspect;
+    camera.fov = fit.fov;
     camera.updateProjectionMatrix();
     renderer.setSize(w, h);
   }
 
+  // Audit §14 flagged that iOS Safari toolbar collapse + tab-backgrounded
+  // rotates can miss `resize`. Subscribe to orientationchange too so the
+  // camera/bounds resync after a rotation even if `resize` was swallowed.
   window.addEventListener('resize', onResize);
+  window.addEventListener('orientationchange', onResize);
+
+  /**
+   * Current viewport fit (FOV + visible-volume bounds). Returned freshly
+   * each call so spawnRound can place balls inside the live frustum even
+   * after a resize / rotation. Phase M2.
+   */
+  function getViewportFit() {
+    return fit;
+  }
 
   /**
    * Tear down the scene completely — stops the loop, disposes the renderer,
@@ -168,6 +190,7 @@ export function createScene(mount) {
   function dispose() {
     stop();
     window.removeEventListener('resize', onResize);
+    window.removeEventListener('orientationchange', onResize);
     tickListeners.clear();
     pickables.length = 0;
 
@@ -207,6 +230,7 @@ export function createScene(mount) {
     stop,
     onTick,
     onResize,
+    getViewportFit,
     dispose,
     get elapsed() {
       return elapsed;

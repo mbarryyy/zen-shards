@@ -46,6 +46,14 @@ vi.mock('../src/scene.js', () => {
       start: () => { calls.start += 1; },
       stop: () => { calls.stop += 1; },
       onTick: (fn) => { tickListeners.add(fn); return () => tickListeners.delete(fn); },
+      getViewportFit: () => ({
+        fov: 45,
+        aspect: 16 / 9,
+        isPortrait: false,
+        visibleWidth: 16,
+        visibleHeight: 9,
+        bounds: { x: [-5, 5], y: [-3, 3], z: [-2, 2] },
+      }),
       dispose: () => { calls.dispose += 1; tickListeners.clear(); },
       get elapsed() { return 0; },
     };

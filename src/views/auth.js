@@ -41,7 +41,8 @@ export function mount(container) {
       <form class="auth__form" novalidate>
         <label class="auth__label" for="auth-email">Email</label>
         <input class="auth__input" id="auth-email" type="email" inputmode="email"
-               autocomplete="email" required placeholder="you@example.com"
+               autocomplete="email" autocapitalize="off" autocorrect="off"
+               spellcheck="false" required placeholder="you@example.com"
                aria-describedby="auth-error" />
         <p class="auth__error" id="auth-error" role="alert" aria-live="polite"></p>
         <button class="zen-btn zen-btn--primary" type="submit">Continue</button>

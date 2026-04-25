@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#d4dde6" />
   <title>Zen Shards</title>
 
@@ -69,6 +69,12 @@
       --ease-out-zen: cubic-bezier(0.22, 0.61, 0.36, 1);
       --ease-in-zen:  cubic-bezier(0.55, 0.06, 0.68, 0.19);
       --breath-period: 4.5s;
+
+      /* Layout — single source of truth for top-nav height so HUD pills,
+         page padding, and scroll containers all clear the nav uniformly.
+         Mobile media-queries below override this with safe-area-aware
+         values so pills never sit under a notch. */
+      --nav-h: 56px;
     }
 
     /* ──────────────────────────────────────────────────────────
@@ -77,6 +83,14 @@
     * { margin: 0; padding: 0; outline: none !important; box-sizing: border-box; }
     html, body, #root, #app, .page-container {
       width: 100%; height: 100%; overflow: hidden;
+    }
+    /* Mobile/touch baseline — kill the iOS gray tap flash and the 300ms
+       double-tap zoom delay on every interactive surface. Adding here
+       (rather than per-component) guarantees no element gets missed when
+       new buttons/links are introduced later. */
+    button, a, [role="button"], input, [tabindex] {
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
     }
     html, body {
       background:
@@ -91,6 +105,7 @@
       -webkit-font-smoothing: antialiased;
       -moz-osx-font-smoothing: grayscale;
       text-rendering: optimizeLegibility;
+      overflow-x: hidden; /* mobile safety — sub-pixel transform overflow */
     }
     canvas { display: block; outline: none !important; }
 
@@ -149,9 +164,13 @@
     #ui > * { pointer-events: auto; }
     #ui .non-interactive { pointer-events: none; }
 
-    /* Top-centre pills row */
+    /* Top-centre pills row.
+       `top` references --nav-h (defined on :root) so the pills always
+       clear the top-bar nav, including its safe-area-inset on notched
+       phones. Mobile breakpoints below recompute --nav-h and tighten
+       this offset. */
     .hud-top {
-      position: fixed; top: 80px; left: 50%;
+      position: fixed; top: calc(var(--nav-h) + 24px); left: 50%;
       transform: translateX(-50%);
       display: flex; gap: 12px;
       pointer-events: none;
@@ -167,6 +186,7 @@
       color: var(--accent-dim);
       backdrop-filter: blur(6px);
       -webkit-backdrop-filter: blur(6px);
+      white-space: nowrap; /* labels never wrap when squeezed on narrow widths */
     }
     .hud-pill__label {
       text-transform: uppercase;
@@ -177,11 +197,13 @@
     .hud-pill__value {
       font-weight: 600; color: var(--accent-text);
       font-variant-numeric: tabular-nums;
+      min-width: 1.25em; /* prevent neighbor reflow when value pulses + width changes (e.g. 9 → 10) */
+      text-align: right;
     }
 
     /* Phase hint — cross-fades on text change via .hud-hint--out */
     .hud-hint {
-      position: fixed; top: 128px; left: 50%;
+      position: fixed; top: calc(var(--nav-h) + 72px); left: 50%;
       transform: translateX(-50%);
       font-size: 11px; letter-spacing: 0.32em;
       text-transform: uppercase;
@@ -199,7 +221,7 @@
        being consumed flashes red during its transition.
        ────────────────────────────────────────────────────────── */
     .hud-lives {
-      position: fixed; top: 158px; left: 50%;
+      position: fixed; top: calc(var(--nav-h) + 102px); left: 50%;
       transform: translateX(-50%);
       display: flex; gap: 12px; align-items: center;
       pointer-events: none;
@@ -419,6 +441,148 @@
     }
 
     /* ╔═══════════════════════════════════════════════════════════════════╗
+       ║ PHASE M3 — HUD mobile layout                                      ║
+       ║                                                                   ║
+       ║ Breakpoints (per docs/mobile-audit.md):                           ║
+       ║   ≤768px  tablet — minor calm-bar tightening only                 ║
+       ║   ≤600px  small tablet / phone landscape                          ║
+       ║   ≤480px  phone portrait — main mobile rules                      ║
+       ║   ≤360px  smallest phone — collapse calm bar to icon+number       ║
+       ║                                                                   ║
+       ║ Strategy: shrink type/padding/gaps so the centred HUD top row    ║
+       ║ stays single-line; honor env(safe-area-inset-*) so notched        ║
+       ║ phones don't clip pills under the status bar.                     ║
+       ╚═══════════════════════════════════════════════════════════════════╝ */
+
+    /* Tablet portrait — calm bar slightly narrower so it doesn't crowd
+       the bottom-right level pill on iPad-portrait widths. */
+    @media (max-width: 768px) {
+      .hud-calm__bar { width: 120px; }
+    }
+
+    /* Phone landscape / small tablet — meaningful tightening starts here. */
+    @media (max-width: 600px) {
+      .hud-top {
+        top: calc(var(--nav-h) + 12px);
+        gap: 10px;
+      }
+      .hud-pill {
+        padding: 7px 14px;
+        font-size: 12px;
+      }
+      .hud-hint {
+        top: calc(var(--nav-h) + 56px);
+        font-size: 10px;
+        letter-spacing: 0.26em;
+      }
+      .hud-lives {
+        top: calc(var(--nav-h) + 84px);
+        gap: 11px;
+      }
+      .hud-calm {
+        left: max(16px, env(safe-area-inset-left, 0px));
+        bottom: calc(env(safe-area-inset-bottom, 0px) + 16px);
+        padding: 9px 12px;
+      }
+      .hud-calm__bar { width: 110px; }
+      .hud-level {
+        right: max(16px, env(safe-area-inset-right, 0px));
+        bottom: calc(env(safe-area-inset-bottom, 0px) + 18px);
+      }
+
+      /* Game-Over panel: stop forcing 320px min-width + cap to viewport. */
+      .hud-gameover__panel {
+        min-width: 0;
+        max-width: 92vw;
+        max-height: 88vh;
+        overflow-y: auto;
+        padding: 28px 26px;
+      }
+      .hud-gameover__btn {
+        min-height: 44px; /* WCAG 2.5.5 touch target */
+      }
+    }
+
+    /* Phone portrait — primary mobile rules (per spec). */
+    @media (max-width: 480px) {
+      .hud-top {
+        top: calc(var(--nav-h) + 10px);
+        gap: 8px;
+      }
+      .hud-pill {
+        padding: 6px 12px;
+        font-size: 11px;
+        gap: 6px;
+      }
+      .hud-pill__label {
+        font-size: 9px;
+        letter-spacing: 0.16em;
+      }
+      .hud-hint {
+        top: calc(var(--nav-h) + 50px);
+        font-size: 10px;
+        letter-spacing: 0.22em;
+      }
+      .hud-lives {
+        top: calc(var(--nav-h) + 76px);
+        gap: 10px;
+      }
+      .hud-calm {
+        padding: 8px 12px;
+        gap: 8px;
+        font-size: 11px;
+        border-radius: 12px;
+      }
+      .hud-calm__tier { font-size: 16px; }
+      .hud-calm__bar { width: 100px; }
+      .hud-calm__label { display: none; } /* "Calm Index" wordmark redundant on phone */
+
+      /* Bottom-right level pill duplicates the Round HUD pill (already
+         aria-hidden) — drop it on phones where every pixel counts. */
+      .hud-level { display: none; }
+
+      .hud-gameover__panel {
+        padding: 22px 20px;
+        border-radius: 18px;
+      }
+      .hud-gameover__title {
+        font-size: 18px;
+        letter-spacing: 0.28em;
+        margin-bottom: 18px;
+      }
+      .hud-gameover__stats {
+        gap: 4px 16px;
+        margin-bottom: 22px;
+        font-size: 12px;
+      }
+      .hud-gameover__stats dt { font-size: 9px; }
+      .hud-gameover__actions {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+      }
+      .hud-gameover__btn {
+        width: 100%;
+        min-height: 48px;
+        padding: 12px 20px;
+        font-size: 11px;
+      }
+    }
+
+    /* Smallest phones — collapse calm bar to emoji + numeric value only. */
+    @media (max-width: 360px) {
+      .hud-top { gap: 6px; }
+      .hud-pill {
+        padding: 5px 10px;
+        font-size: 10px;
+        letter-spacing: 0.02em;
+      }
+      .hud-pill__label { font-size: 8px; letter-spacing: 0.14em; }
+      .hud-hint { font-size: 9px; letter-spacing: 0.18em; }
+      .hud-calm__bar { display: none; }
+    }
+
+    /* ╔═══════════════════════════════════════════════════════════════════╗
        ║ PHASE 10 — App shell                                              ║
        ║                                                                   ║
        ║ Layout containers: #app-nav-host (fixed top), #app (page mount).  ║
@@ -466,6 +630,7 @@
       display: inline-flex; align-items: center; justify-content: center;
       padding: 12px 28px;
       min-width: 132px;
+      min-height: 44px; /* WCAG 2.5.5 touch target */
       background: transparent;
       border: 1px solid var(--border-strong);
       border-radius: 999px;
@@ -523,6 +688,8 @@
       letter-spacing: 0.16em;
       text-transform: uppercase;
       font-size: 12px;
+      min-height: 44px; /* WCAG 2.5.5 — logo is a clickable home link */
+      padding: 0 4px; /* widen the tap area a touch */
     }
     .app-nav__mark {
       width: 14px; height: 14px;
@@ -617,12 +784,15 @@
       50%      { transform: scale(1.05); filter: brightness(1.08); }
     }
     .landing__title {
-      font-size: 56px;
+      font-size: clamp(2rem, 8vw, 3.5rem); /* 32px on phone → 56px on desktop */
       font-weight: 300;
-      letter-spacing: 0.36em;
+      letter-spacing: clamp(0.18em, 1vw, 0.36em);
       text-transform: uppercase;
       color: var(--accent-text);
-      margin-left: 0.36em; /* visual centering compensates for letter-spacing */
+      /* Half the letter-spacing as a margin-left so the trailing letter's
+         tracking doesn't visually push the title off-center. Using clamp
+         with the same input means the comp stays right at every size. */
+      margin-left: clamp(0.09em, 0.5vw, 0.18em);
     }
     .landing__tagline {
       font-size: 13px;
@@ -725,6 +895,10 @@
       gap: 12px;
       padding: 10px 16px;
       border-radius: 12px;
+      /* Transparent 1px baseline so .leaderboard__row--me's solid border
+         doesn't shift adjacent rows by 1px — every row reserves the same
+         border box, only the color changes for the highlighted row. */
+      border: 1px solid transparent;
       font-size: 13px;
       color: var(--accent-text);
       transition: background 0.25s var(--ease-out-zen);
@@ -732,7 +906,7 @@
     .leaderboard__row:hover { background: rgba(255, 255, 255, 0.4); }
     .leaderboard__row--me {
       background: rgba(31, 95, 168, 0.10);
-      border: 1px solid rgba(31, 95, 168, 0.25);
+      border-color: rgba(31, 95, 168, 0.25);
     }
     .leaderboard__rank {
       font-size: 11px;
@@ -870,13 +1044,275 @@
       .page-container { transition: none !important; }
     }
 
-    /* Compact viewports: stack profile stats + tighten landing typography */
-    @media (max-width: 540px) {
-      .landing__title { font-size: 38px; letter-spacing: 0.28em; }
-      .profile__stats { grid-template-columns: 1fr; }
+    /* ╔═══════════════════════════════════════════════════════════════════╗
+       ║ PHASE M4 — App shell mobile layout                                ║
+       ║                                                                   ║
+       ║ Replaces the original single 540px breakpoint with a cascade       ║
+       ║ aligned to docs/mobile-audit.md:                                  ║
+       ║   ≤768px  tablet portrait — light tightening                      ║
+       ║   ≤600px  phone landscape / small tablet — main responsive shifts ║
+       ║   ≤480px  phone portrait — final compaction                       ║
+       ╚═══════════════════════════════════════════════════════════════════╝ */
+
+    @media (max-width: 768px) {
+      /* Tablet: trim glass-card outer padding so cards breathe vs viewport. */
+      .glass-card { padding: 36px 32px; }
+
+      /* iOS Safari auto-zooms inputs <16px; bump now and the zoom-jolt
+         disappears across phones+tablets. Doesn't visibly affect desktop
+         since this rule won't run there. */
+      .auth__input { font-size: 16px; }
+
+      /* Auth card slightly narrower per spec (was 420). */
+      .auth { max-width: 380px; }
+
+      /* Profile stats step down to 2-col on tablet/landscape phone. */
+      .profile__stats { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    @media (max-width: 600px) {
+      /* Page edge padding tighter so cards aren't pinched. */
+      .page { padding: 0 16px; }
+
       .glass-card { padding: 28px 22px; }
-      .app-nav { padding: 10px 16px; }
-      .app-nav__links a { padding: 6px 10px; font-size: 10px; }
+
+      /* Top-bar nav: tighten chrome. Honors safe-area-inset for notched
+         phones. Logo + links stay on one row by shrinking link pills. */
+      .app-nav {
+        padding: 10px 16px;
+        padding-top: max(10px, env(safe-area-inset-top, 0px));
+        padding-left: max(16px, env(safe-area-inset-left, 0px));
+        padding-right: max(16px, env(safe-area-inset-right, 0px));
+        gap: 8px;
+      }
+      .app-nav__logo { font-size: 11px; gap: 8px; }
+      .app-nav__links { gap: 4px; }
+      .app-nav__links a {
+        padding: 8px 10px;
+        font-size: 10px;
+        letter-spacing: 0.14em;
+        min-height: 44px; /* WCAG: pad ensures tap area without huge visual */
+        display: inline-flex; align-items: center;
+      }
+      .app-nav__signin {
+        padding: 10px 12px;
+        min-height: 44px;
+        display: inline-flex; align-items: center;
+      }
+      .app-nav__user {
+        font-size: 10px;
+        max-width: 30vw;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      /* Landing: stack CTAs full-width column on phone landscape and below. */
+      .landing { gap: 36px; }
+      .landing__cta {
+        flex-direction: column;
+        align-items: stretch;
+        width: 100%;
+        max-width: 320px;
+      }
+      .landing__cta .zen-btn {
+        width: 100%;
+        min-height: 48px; /* primary CTA — bigger than 44px floor */
+        font-size: 12px;
+      }
+
+      /* Leaderboard: table → vertical card list per spec.
+         Layout:
+           [rank] [name . . . . . . . ]
+           [      ] [score . . . . .] [tier]                                */
+      .leaderboard__list { gap: 8px; }
+      .leaderboard__row {
+        grid-template-columns: 36px 1fr auto;
+        grid-template-areas:
+          "rank name name"
+          "rank score tier";
+        row-gap: 4px;
+        column-gap: 10px;
+        padding: 12px 14px;
+        background: rgba(255, 255, 255, 0.32);
+        border: 1px solid var(--border-soft);
+        border-radius: 14px;
+        font-size: 14px;
+      }
+      .leaderboard__row:hover { background: rgba(255, 255, 255, 0.42); }
+      .leaderboard__rank {
+        grid-area: rank;
+        align-self: center;
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--accent-text);
+        letter-spacing: 0.04em;
+      }
+      .leaderboard__name { grid-area: name; }
+      .leaderboard__score { grid-area: score; font-size: 13px; }
+      .leaderboard__tier { grid-area: tier; align-self: end; }
+
+      /* Headlines on the leaderboard / profile / auth cards — fluid scale. */
+      .leaderboard__header h1,
+      .auth__title { font-size: 18px; letter-spacing: 0.24em; }
+      .profile__header h1 { font-size: 20px; letter-spacing: 0.18em; }
+
+      /* Profile stats — keep 2-col here on tiny landscape; 1-col on ≤480. */
+      .profile__stats { gap: 12px; }
+    }
+
+    @media (max-width: 480px) {
+      /* Auth card edge padding tighter again. */
+      .glass-card { padding: 24px 18px; }
+      .page { padding: 0 12px; }
+
+      /* App nav: drop the user wordmark to give links room.
+         Keep .app-nav__signin (anonymous users still need sign-in path). */
+      .app-nav__user-name { display: none; }
+      .app-nav__logo-text {
+        max-width: 96px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      /* Landing: shorter vertical breathing room. */
+      .landing { gap: 28px; }
+      .landing__mark { width: 76px; height: 76px; }
+      .landing__mark-orb--a { width: 50px; height: 50px; top: 16px; }
+      .landing__mark-orb--b { width: 30px; height: 30px; }
+      .landing__mark-orb--c { width: 18px; height: 18px; }
+      .landing__tagline { font-size: 11px; letter-spacing: 0.24em; }
+
+      /* Profile stats finally collapse to single column per spec. */
+      .profile__stats { grid-template-columns: 1fr; }
+
+      /* Leaderboard rows tighter on tiny phones. */
+      .leaderboard__row {
+        grid-template-columns: 30px 1fr auto;
+        padding: 10px 12px;
+        font-size: 13px;
+      }
+      .leaderboard__rank { font-size: 13px; }
+    }
+
+    /* ╔═══════════════════════════════════════════════════════════════════╗
+       ║ PHASE M3/M4 — Cross-cutting mobile fixes (folded in from QA review)║
+       ║                                                                   ║
+       ║ - --nav-h recomputed per-breakpoint with safe-area awareness so    ║
+       ║   HUD pills and page padding never collide with the top nav.     ║
+       ║ - .page-container becomes the scroll context for non-play pages   ║
+       ║   (auth/leaderboard/profile/landing) so tall content like a 30-row║
+       ║   leaderboard doesn't clip on a 320×568 phone.                    ║
+       ║ - 100dvh on mobile so iOS Safari's dynamic chrome doesn't make    ║
+       ║   100% jump as the toolbar shows/hides.                           ║
+       ║ - (hover: none) reset so :hover states don't get stuck on tap on  ║
+       ║   touch devices.                                                  ║
+       ║ - (orientation: landscape) and (max-height: 480px) — phone-       ║
+       ║   landscape rules where the constraint is height, not width.     ║
+       ╚═══════════════════════════════════════════════════════════════════╝ */
+
+    @media (max-width: 768px) {
+      /* Use dynamic viewport units so iOS Safari toolbar collapse/expand
+         doesn't cause a height jump. dvh is well-supported in Safari 16+,
+         Chrome 108+, Firefox 101+. height:100% remains the fallback. */
+      html, body, #root, #app { height: 100dvh; }
+
+      /* Page-container scroll override: by default `.page-container` is
+         `position: fixed; inset: 0; overflow: hidden` which prevents
+         vertical scroll on small phones where a card might be taller than
+         the viewport. Allow scroll on every route EXCEPT play (which must
+         stay locked so the canvas fills the viewport). The :has() selector
+         is supported in all relevant browsers (Safari 15.4+, Chrome 105+). */
+      .page-container { overflow-y: auto; -webkit-overflow-scrolling: touch; }
+      .page-container:has(.page--play) { overflow: hidden; }
+
+      /* Recompute --nav-h to include safe-area-inset-top so HUD pills
+         clear the notch + nav padding together. */
+      :root { --nav-h: calc(env(safe-area-inset-top, 0px) + 60px); }
+    }
+
+    @media (max-width: 480px) {
+      :root { --nav-h: calc(env(safe-area-inset-top, 0px) + 56px); }
+    }
+
+    /* Phone landscape — height-budget rules, not width. The bottom-anchored
+       calm bar + level pill have very little vertical room here, and the
+       game-over modal must compress aggressively or buttons disappear
+       below the fold. */
+    @media (orientation: landscape) and (max-height: 480px) {
+      .hud-top {
+        top: calc(env(safe-area-inset-top, 0px) + 8px);
+      }
+      .hud-hint {
+        top: calc(env(safe-area-inset-top, 0px) + 38px);
+        font-size: 9px;
+      }
+      .hud-lives {
+        top: calc(env(safe-area-inset-top, 0px) + 60px);
+        gap: 9px;
+      }
+      .hud-calm {
+        padding: 6px 10px;
+        bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
+        left: max(12px, env(safe-area-inset-left, 0px));
+      }
+      .hud-calm__bar { width: 80px; }
+      .hud-calm__label { display: none; }
+      .hud-level { display: none; }
+
+      .hud-gameover__panel {
+        max-height: 92vh;
+        padding: 18px 22px;
+      }
+      .hud-gameover__title {
+        margin-bottom: 12px;
+        font-size: 16px;
+      }
+      .hud-gameover__stats {
+        margin-bottom: 14px;
+        gap: 2px 16px;
+      }
+      .hud-gameover__actions {
+        flex-direction: row; /* override ≤480 column-stack — vertical room is the constraint */
+        gap: 8px;
+      }
+      .hud-gameover__btn {
+        width: auto;
+        min-height: 40px;
+        padding: 8px 18px;
+      }
+    }
+
+    /* Coarse-pointer reset — touch devices should not retain :hover state
+       after a tap. Re-declare the original (non-hover) values so the rule
+       wins on specificity without `!important`. Wrapping the source rules
+       in `@media (hover: hover)` would be cleaner but means touching 8
+       scattered selectors; this single block keeps the diff focused and
+       is trivial to extend when new hover rules are added. */
+    @media (hover: none) {
+      .zen-btn:hover {
+        background: transparent;
+        border-color: var(--border-strong);
+        color: var(--accent-text);
+        transform: none;
+      }
+      .zen-btn--primary:hover {
+        background: rgba(31, 95, 168, 0.14);
+        border-color: var(--accent-bright);
+        color: var(--accent-bright);
+      }
+      .app-nav__links a:hover { color: var(--accent-dim); }
+      .app-nav__signin:hover { background: transparent; }
+      .leaderboard__row:hover { background: transparent; }
+      .hud-gameover__btn:hover {
+        background: transparent;
+        border-color: var(--border-strong);
+      }
+      .hud-gameover__btn--primary:hover {
+        background: rgba(31, 95, 168, 0.14);
+        border-color: var(--accent-bright);
+      }
     }
   </style>
 </head>

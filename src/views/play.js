@@ -74,7 +74,11 @@ export function mount(container) {
   function spawnRound(round) {
     clearBalls();
     const count = ballCountForRound(round);
-    const positions = generatePositions(count);
+    // Pull viewport-fit bounds fresh per round so balls always land inside
+    // whatever the user's currently looking at — desktop, tablet, portrait
+    // phone, or anything in between (Phase M2).
+    const fit = stage.getViewportFit();
+    const positions = generatePositions(count, { bounds: fit.bounds });
     const ids = [];
     for (const pos of positions) {
       const b = new Ball({ position: pos });
@@ -160,10 +164,14 @@ export function mount(container) {
       startGame();
       return;
     }
+    // Same viewport-aware bounds the round was spawned with — keeps split
+    // children from drifting off-screen on a portrait phone (Phase M2).
+    const splitFit = stage.getViewportFit();
     const positions = generateChildPositions(parent.mesh.position, childCount, {
       spread: 1.5 + depth * 0.3,
       minDistance: 0.5,
       obstacles: liveBallPositions(),
+      bounds: splitFit.bounds,
     });
     const childKind = childKindForDepth(depth);
     const childIds = [];
