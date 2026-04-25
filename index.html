@@ -1,0 +1,894 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#d4dde6" />
+  <title>Zen Shards</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+
+  <style>
+    /* ╔═══════════════════════════════════════════════════════════════════╗
+       ║ TUNE: visual "feel" knobs in this file.                          ║
+       ║                                                                  ║
+       ║ Background brightness:    --bg-deep      (darker = moodier)      ║
+       ║ HUD pill background:      --bg-panel     (alpha = panel opacity) ║
+       ║ HUD border softness:      --border-soft  (alpha = how visible)   ║
+       ║ Accent text brightness:   --accent-text  (lighter = more pop)    ║
+       ║                                                                  ║
+       ║ Breath pulse rhythm (the slow ambient screen-edge glow):         ║
+       ║   --breath-period   slower = calmer (4.5s = matches calm exhale) ║
+       ║   #breath-ambient { background: ... 0.07 ... 0.12 } the alphas   ║
+       ║   control how visible the pulse is (lower = more subtle).        ║
+       ║                                                                  ║
+       ║ Wrong-click vignette intensity: --wrong-vignette (alpha)         ║
+       ║ Correct-flash halo color:       --correct-flash (alpha)          ║
+       ║ (these are consumed by future Phase 6 effects)                   ║
+       ║                                                                  ║
+       ║ Don't change without pairing JS tokens:                          ║
+       ║   --ball-primary / --ball-split-l1 / --ball-split-l2 must match  ║
+       ║   the KIND_COLOR map in src/ball.js — change both or neither.    ║
+       ╚══════════════════════════════════════════════════════════════════╝
+
+       Zen Shards · Design Tokens
+       Locked palette per spec — do not introduce new colors.
+    */
+    :root {
+      /* Core background — soft low-saturation light-blue gradient */
+      --bg-top:    #e6ecf2;
+      --bg-bottom: #c2d2e0;
+      --bg-deep:   #d4dde6;            /* fallback / Three.js scene tint */
+      --bg-panel: rgba(255, 255, 255, 0.55);
+      --bg-panel-strong: rgba(245, 248, 252, 0.92);
+
+      /* Glass ball palette — kept in sync with ball.js KIND_COLOR.
+         Phase 8 cool-blue family: orbs live in the same tonal world as
+         the gradient bg so they whisper instead of shouting. */
+      --ball-primary: #dde4ec;     /* warm pearl with blue undertone */
+      --ball-split-l1: #9fb5cc;    /* smoke blue */
+      --ball-split-l2: #5e7a96;    /* deep lake blue */
+      --ball-split: var(--ball-split-l1);
+
+      /* HUD borders + accents — flipped to dark-on-light */
+      --border-soft: rgba(120, 140, 160, 0.30);
+      --border-strong: rgba(90, 110, 130, 0.45);
+      --accent-text: #2a3848;
+      --accent-bright: #1f5fa8;
+      --accent-dim: rgba(50, 70, 90, 0.65);
+      --accent-faint: rgba(50, 70, 90, 0.50);
+      --accent-whisper: rgba(50, 70, 90, 0.35);
+
+      /* Feedback */
+      --correct-flash: rgba(120, 200, 140, 0.32);
+      --wrong-vignette: rgba(220, 90, 80, 0.38);
+
+      /* Motion */
+      --ease-out-zen: cubic-bezier(0.22, 0.61, 0.36, 1);
+      --ease-in-zen:  cubic-bezier(0.55, 0.06, 0.68, 0.19);
+      --breath-period: 4.5s;
+    }
+
+    /* ──────────────────────────────────────────────────────────
+       Reset + base
+       ────────────────────────────────────────────────────────── */
+    * { margin: 0; padding: 0; outline: none !important; box-sizing: border-box; }
+    html, body, #root, #app, .page-container {
+      width: 100%; height: 100%; overflow: hidden;
+    }
+    html, body {
+      background:
+        radial-gradient(ellipse at 50% 0%, #eef3f8 0%, transparent 60%),
+        linear-gradient(180deg, var(--bg-top) 0%, var(--bg-bottom) 100%);
+      background-attachment: fixed;
+    }
+    #root, #app, .page-container { background: transparent; }
+    body {
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      color: #2a3848;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      text-rendering: optimizeLegibility;
+    }
+    canvas { display: block; outline: none !important; }
+
+    /* Focus indicators — visible but soft, never harsh outlines */
+    button:focus-visible,
+    [role="button"]:focus-visible,
+    [tabindex]:focus-visible {
+      box-shadow: 0 0 0 2px var(--accent-bright), 0 0 14px rgba(31, 95, 168, 0.30);
+      transition: box-shadow 0.15s var(--ease-out-zen);
+    }
+
+    /* ──────────────────────────────────────────────────────────
+       Ambient breath pulse — soft inward green glow on screen
+       edges, syncing the player's breathing to the game's rhythm.
+       Sits behind the canvas? No — above, but pointer-events:none
+       so it never steals clicks.
+       ────────────────────────────────────────────────────────── */
+    #breath-ambient {
+      position: fixed; inset: 0;
+      pointer-events: none;
+      z-index: 2;
+      background: radial-gradient(
+        ellipse at center,
+        transparent 55%,
+        rgba(180, 200, 220, 0.10) 92%,
+        rgba(160, 185, 210, 0.16) 100%
+      );
+      opacity: 0;
+      animation: breath-pulse var(--breath-period) ease-in-out infinite;
+      mix-blend-mode: multiply;
+    }
+    @keyframes breath-pulse {
+      0%, 100% { opacity: 0.0; }
+      45%      { opacity: 1.0; }
+      55%      { opacity: 1.0; }
+    }
+    /* Wrong-click cue: pause the breath briefly so the player feels the
+       rhythm was interrupted. Feedback module toggles this class. */
+    #breath-ambient.breath-disrupted {
+      animation-play-state: paused;
+      opacity: 0;
+      transition: opacity 0.2s var(--ease-out-zen);
+    }
+
+    /* ──────────────────────────────────────────────────────────
+       UI overlay shell
+       Phase 5 HUD (structure + minimal styling). Phase 6 polish-pass
+       (ui-3d-designer) will refine motion + composition.
+       ────────────────────────────────────────────────────────── */
+    #ui {
+      position: fixed; inset: 0;
+      pointer-events: none;
+      z-index: 10;
+      user-select: none;
+    }
+    #ui > * { pointer-events: auto; }
+    #ui .non-interactive { pointer-events: none; }
+
+    /* Top-centre pills row */
+    .hud-top {
+      position: fixed; top: 80px; left: 50%;
+      transform: translateX(-50%);
+      display: flex; gap: 12px;
+      pointer-events: none;
+    }
+    .hud-pill {
+      display: flex; align-items: baseline; gap: 8px;
+      padding: 8px 16px;
+      background: var(--bg-panel);
+      border: 1px solid var(--border-soft);
+      border-radius: 999px;
+      font-size: 13px;
+      letter-spacing: 0.04em;
+      color: var(--accent-dim);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+    }
+    .hud-pill__label {
+      text-transform: uppercase;
+      font-size: 10px;
+      letter-spacing: 0.18em;
+      color: var(--accent-faint);
+    }
+    .hud-pill__value {
+      font-weight: 600; color: var(--accent-text);
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* Phase hint — cross-fades on text change via .hud-hint--out */
+    .hud-hint {
+      position: fixed; top: 128px; left: 50%;
+      transform: translateX(-50%);
+      font-size: 11px; letter-spacing: 0.32em;
+      text-transform: uppercase;
+      color: var(--accent-whisper);
+      pointer-events: none;
+      opacity: 1;
+      transition: opacity 0.32s var(--ease-out-zen);
+    }
+    .hud-hint--out { opacity: 0; }
+
+    /* ──────────────────────────────────────────────────────────
+       Lives indicator — three bare dots, centred below the phase hint.
+       No pill/background/border — just dots floating against the bg.
+       Remaining = solid white. Lost = hollow white outline. The dot
+       being consumed flashes red during its transition.
+       ────────────────────────────────────────────────────────── */
+    .hud-lives {
+      position: fixed; top: 158px; left: 50%;
+      transform: translateX(-50%);
+      display: flex; gap: 12px; align-items: center;
+      pointer-events: none;
+      background: none; border: none; padding: 0;
+    }
+    .hud-lives__dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: #ffffff;
+      box-shadow: 0 0 6px rgba(255, 255, 255, 0.60);
+      transition: background 0.4s var(--ease-out-zen),
+                  box-shadow 0.4s var(--ease-out-zen),
+                  transform 0.4s var(--ease-out-zen),
+                  opacity 0.4s var(--ease-out-zen);
+    }
+    .hud-lives__dot.lost {
+      background: transparent;
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.55);
+      transform: scale(0.85);
+      opacity: 0.65;
+    }
+    /* One-shot red pulse fired on the dot transitioning full → lost */
+    .hud-lives__dot.losing {
+      animation: hud-life-lose 0.55s var(--ease-out-zen);
+    }
+    @keyframes hud-life-lose {
+      0%   { background: #ffffff; transform: scale(1);
+             box-shadow: 0 0 6px rgba(255, 255, 255, 0.60); }
+      30%  { background: #e85a5f; transform: scale(1.55);
+             box-shadow: 0 0 22px rgba(232, 90, 95, 0.85); }
+      70%  { background: #e85a5f; transform: scale(1.10);
+             box-shadow: 0 0 12px rgba(232, 90, 95, 0.50); }
+      100% { background: transparent; transform: scale(0.85);
+             box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.55); }
+    }
+
+    /* HUD pill value pulse — fires when round/score/streak change */
+    .hud-pill__value.pulsing {
+      animation: hud-pill-pulse 0.35s var(--ease-out-zen);
+    }
+    @keyframes hud-pill-pulse {
+      0%   { transform: translateY(0); color: var(--accent-text); }
+      40%  { transform: translateY(-2px); color: var(--accent-bright);
+             text-shadow: 0 0 14px rgba(31, 95, 168, 0.45); }
+      100% { transform: translateY(0); color: var(--accent-text); text-shadow: none; }
+    }
+
+    /* Calm Index tier emoji pulse — fires when the tier changes */
+    .hud-calm__tier.pulsing {
+      animation: hud-tier-pulse 0.6s var(--ease-out-zen);
+    }
+    @keyframes hud-tier-pulse {
+      0%   { transform: scale(1); filter: brightness(1); }
+      30%  { transform: scale(1.35); filter: brightness(1.2) drop-shadow(0 0 6px rgba(31, 95, 168, 0.45)); }
+      100% { transform: scale(1); filter: brightness(1); }
+    }
+
+    /* HUD entrance — opacity-only fade-in so we don't fight the translateX
+       centring on .hud-top + .hud-hint. Staggered for a calm cascade. */
+    .hud-top, .hud-calm, .hud-level, .hud-hint {
+      animation: hud-fade-in 0.7s var(--ease-out-zen) both;
+    }
+    .hud-calm  { animation-delay: 0.10s; }
+    .hud-level { animation-delay: 0.15s; }
+    .hud-hint  { animation-delay: 0.20s; }
+    @keyframes hud-fade-in {
+      from { opacity: 0; }
+      to   { opacity: 1; }
+    }
+
+    /* Bottom-left Calm Index gauge */
+    .hud-calm {
+      position: fixed; left: 22px; bottom: 22px;
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 14px;
+      background: var(--bg-panel);
+      border: 1px solid var(--border-soft);
+      border-radius: 14px;
+      font-size: 12px;
+      color: var(--accent-dim);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+    }
+    .hud-calm__tier { font-size: 18px; line-height: 1; }
+    .hud-calm__bar {
+      width: 140px; height: 6px;
+      background: rgba(120, 140, 160, 0.20);
+      border-radius: 3px; overflow: hidden;
+    }
+    .hud-calm__fill {
+      height: 100%; width: 0%;
+      background: linear-gradient(90deg, #6fa6d4, #1f5fa8);
+      transition: width 0.7s var(--ease-out-zen),
+                  background 0.7s var(--ease-out-zen);
+      box-shadow: 0 0 8px rgba(31, 95, 168, 0.25) inset;
+    }
+    .hud-calm__value {
+      font-weight: 600; color: var(--accent-text);
+      font-variant-numeric: tabular-nums;
+      min-width: 22px; text-align: right;
+    }
+    .hud-calm__label {
+      font-size: 9px; text-transform: uppercase;
+      letter-spacing: 0.2em; color: var(--accent-faint);
+    }
+
+    /* Bottom-right level */
+    .hud-level {
+      position: fixed; right: 22px; bottom: 26px;
+      font-size: 11px; letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--accent-faint);
+    }
+
+    /* Game-Over modal — animated entrance via .entering → final state */
+    .hud-gameover {
+      position: fixed; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(220, 230, 240, 0.55);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      z-index: 20;
+      opacity: 1;
+      transition: opacity 0.45s var(--ease-out-zen),
+                  backdrop-filter 0.6s var(--ease-out-zen);
+    }
+    .hud-gameover[hidden] { display: none; }
+    .hud-gameover.entering {
+      opacity: 0;
+      backdrop-filter: blur(0px);
+      -webkit-backdrop-filter: blur(0px);
+    }
+    .hud-gameover__panel {
+      background: var(--bg-panel-strong);
+      border: 1px solid var(--border-strong);
+      border-radius: 22px;
+      padding: 36px 48px;
+      min-width: 320px;
+      text-align: center;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+      transform: scale(1) translateY(0);
+      opacity: 1;
+      transition: transform 0.55s var(--ease-out-zen),
+                  opacity 0.55s var(--ease-out-zen);
+    }
+    .hud-gameover.entering .hud-gameover__panel {
+      transform: scale(0.92) translateY(8px);
+      opacity: 0;
+    }
+    .hud-gameover__title {
+      font-size: 22px; font-weight: 300;
+      letter-spacing: 0.32em; text-transform: uppercase;
+      color: var(--accent-text);
+      margin-bottom: 22px;
+    }
+    .hud-gameover__stats {
+      display: grid; grid-template-columns: 1fr auto;
+      gap: 6px 24px; margin-bottom: 26px;
+      font-size: 13px; color: var(--accent-dim);
+    }
+    .hud-gameover__stats dt {
+      text-transform: uppercase; font-size: 10px; letter-spacing: 0.18em;
+      color: var(--accent-faint); text-align: left;
+    }
+    .hud-gameover__stats dd {
+      color: var(--accent-text); font-weight: 600;
+      font-variant-numeric: tabular-nums; text-align: right;
+    }
+    .hud-gameover__tier {
+      margin-left: 6px; color: var(--accent-faint);
+      font-size: 11px; letter-spacing: 0.12em;
+    }
+    .hud-gameover__btn {
+      padding: 10px 26px;
+      background: transparent;
+      border: 1px solid var(--border-strong);
+      border-radius: 999px;
+      color: var(--accent-text);
+      font: inherit;
+      font-size: 12px;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: background 0.25s var(--ease-out-zen),
+                  border-color 0.25s var(--ease-out-zen);
+    }
+    .hud-gameover__btn:hover {
+      background: rgba(31, 95, 168, 0.08);
+      border-color: var(--accent-bright);
+    }
+
+    /* ──────────────────────────────────────────────────────────
+       Reduced-motion: kill the ambient breath, keep static glow
+       so the visual identity remains but nothing animates. Feedback
+       overlays still appear (vignette/halo/score float) — they're
+       essential feedback, not decoration — but they fade in/out
+       quickly without scaling.
+       ────────────────────────────────────────────────────────── */
+    @media (prefers-reduced-motion: reduce) {
+      #breath-ambient {
+        animation: none;
+        opacity: 0.55;
+      }
+      .hud-pill__value.pulsing,
+      .hud-calm__tier.pulsing,
+      .hud-lives__dot.losing {
+        animation: none !important;
+      }
+      .hud-gameover__panel {
+        transform: none !important;
+      }
+      *, *::before, *::after {
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.001ms !important;
+      }
+    }
+
+    /* ╔═══════════════════════════════════════════════════════════════════╗
+       ║ PHASE 10 — App shell                                              ║
+       ║                                                                   ║
+       ║ Layout containers: #app-nav-host (fixed top), #app (page mount).  ║
+       ║ Pages live inside .page-container > .page; the router fades        ║
+       ║ .page-container in/out on every route swap.                       ║
+       ╚═══════════════════════════════════════════════════════════════════╝ */
+
+    /* Page container — host for whichever view is currently mounted.
+       Cross-fades on route swap (router toggles .page-container--fading). */
+    .page-container {
+      position: fixed;
+      inset: 0;
+      z-index: 5; /* above breath ambient (2), below HUD overlay (10) */
+      opacity: 1;
+      transition: opacity 0.4s var(--ease-out-zen);
+    }
+    .page-container--fading { opacity: 0; }
+
+    .page {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      padding: 0 24px;
+    }
+    .page--play {
+      /* The play view fills its host with the canvas; no centering offsets. */
+      padding: 0;
+      align-items: stretch; justify-content: stretch;
+    }
+
+    /* Reusable glass card for static pages */
+    .glass-card {
+      background: var(--bg-panel);
+      border: 1px solid var(--border-soft);
+      border-radius: 22px;
+      padding: 44px 48px;
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      box-shadow: 0 18px 48px rgba(60, 80, 110, 0.10);
+      max-width: 560px;
+      width: 100%;
+    }
+
+    /* Reusable buttons */
+    .zen-btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      padding: 12px 28px;
+      min-width: 132px;
+      background: transparent;
+      border: 1px solid var(--border-strong);
+      border-radius: 999px;
+      color: var(--accent-text);
+      font: inherit;
+      font-size: 12px;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: background 0.3s var(--ease-out-zen),
+                  border-color 0.3s var(--ease-out-zen),
+                  color 0.3s var(--ease-out-zen),
+                  transform 0.3s var(--ease-out-zen);
+    }
+    .zen-btn:hover {
+      background: rgba(31, 95, 168, 0.06);
+      border-color: var(--accent-bright);
+      color: var(--accent-bright);
+    }
+    .zen-btn:active { transform: translateY(1px); }
+    .zen-btn--primary {
+      background: rgba(31, 95, 168, 0.14);
+      border-color: var(--accent-bright);
+      color: var(--accent-bright);
+    }
+    .zen-btn--primary:hover {
+      background: rgba(31, 95, 168, 0.22);
+    }
+    .zen-btn--ghost {
+      border-color: var(--border-soft);
+      color: var(--accent-dim);
+    }
+
+    /* ─── Top-bar nav ───────────────────────────────────────────── */
+    .app-nav {
+      position: fixed; top: 0; left: 0; right: 0;
+      z-index: 11;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 28px;
+      background: rgba(255, 255, 255, 0.42);
+      border-bottom: 1px solid var(--border-soft);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      animation: app-nav-fade 0.5s var(--ease-out-zen);
+    }
+    .app-nav[hidden] { display: none; }
+    @keyframes app-nav-fade { from { opacity: 0; } to { opacity: 1; } }
+
+    .app-nav__logo {
+      display: inline-flex; align-items: center; gap: 10px;
+      text-decoration: none;
+      color: var(--accent-text);
+      font-weight: 500;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      font-size: 12px;
+    }
+    .app-nav__mark {
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 35% 30%,
+        var(--ball-primary) 0%,
+        var(--ball-split-l1) 60%,
+        var(--ball-split-l2) 100%);
+      box-shadow: 0 0 8px rgba(94, 122, 150, 0.45);
+    }
+    .app-nav__links {
+      display: flex; gap: 8px; list-style: none;
+    }
+    .app-nav__links a {
+      display: inline-block;
+      padding: 6px 14px;
+      border-radius: 999px;
+      font-size: 11px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--accent-dim);
+      text-decoration: none;
+      transition: background 0.25s var(--ease-out-zen),
+                  color 0.25s var(--ease-out-zen);
+    }
+    .app-nav__links a:hover { color: var(--accent-text); }
+    .app-nav__links a.is-active {
+      color: var(--accent-bright);
+      background: rgba(31, 95, 168, 0.10);
+    }
+    .app-nav__user {
+      font-size: 11px;
+      letter-spacing: 0.16em;
+      color: var(--accent-faint);
+      text-transform: uppercase;
+    }
+    .app-nav__user-name { color: var(--accent-text); font-weight: 500; }
+    .app-nav__signin {
+      color: var(--accent-bright);
+      text-decoration: none;
+      padding: 6px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--border-soft);
+      transition: background 0.25s var(--ease-out-zen);
+    }
+    .app-nav__signin:hover { background: rgba(31, 95, 168, 0.08); }
+
+    /* ─── Landing ──────────────────────────────────────────────── */
+    .landing {
+      display: flex; flex-direction: column; align-items: center;
+      gap: 56px;
+      text-align: center;
+      max-width: 640px;
+    }
+    .landing__brand {
+      display: flex; flex-direction: column; align-items: center; gap: 18px;
+    }
+    .landing__mark {
+      position: relative;
+      width: 92px; height: 92px;
+      margin-bottom: 8px;
+    }
+    .landing__mark-orb {
+      position: absolute;
+      border-radius: 50%;
+      box-shadow: 0 6px 28px rgba(94, 122, 150, 0.32);
+      animation: landing-orb-breathe 5s ease-in-out infinite;
+    }
+    .landing__mark-orb--a {
+      width: 60px; height: 60px;
+      left: 0; top: 18px;
+      background: radial-gradient(circle at 35% 30%,
+        rgba(255, 255, 255, 0.85), var(--ball-primary) 70%);
+      animation-delay: 0s;
+    }
+    .landing__mark-orb--b {
+      width: 36px; height: 36px;
+      right: 6px; top: 0;
+      background: radial-gradient(circle at 35% 30%,
+        rgba(255, 255, 255, 0.85), var(--ball-split-l1) 70%);
+      animation-delay: 0.6s;
+    }
+    .landing__mark-orb--c {
+      width: 22px; height: 22px;
+      right: 28px; bottom: 4px;
+      background: radial-gradient(circle at 35% 30%,
+        rgba(255, 255, 255, 0.85), var(--ball-split-l2) 70%);
+      animation-delay: 1.2s;
+    }
+    @keyframes landing-orb-breathe {
+      0%, 100% { transform: scale(1);   filter: brightness(1); }
+      50%      { transform: scale(1.05); filter: brightness(1.08); }
+    }
+    .landing__title {
+      font-size: 56px;
+      font-weight: 300;
+      letter-spacing: 0.36em;
+      text-transform: uppercase;
+      color: var(--accent-text);
+      margin-left: 0.36em; /* visual centering compensates for letter-spacing */
+    }
+    .landing__tagline {
+      font-size: 13px;
+      letter-spacing: 0.34em;
+      text-transform: uppercase;
+      color: var(--accent-faint);
+    }
+    .landing__cta {
+      display: flex; flex-wrap: wrap; gap: 14px;
+      justify-content: center;
+    }
+    .landing__hello {
+      font-size: 12px;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--accent-dim);
+    }
+
+    /* ─── Auth ─────────────────────────────────────────────────── */
+    .auth {
+      max-width: 420px;
+      text-align: center;
+    }
+    .auth__title {
+      font-size: 22px; font-weight: 300;
+      letter-spacing: 0.3em;
+      text-transform: uppercase;
+      color: var(--accent-text);
+      margin-bottom: 12px;
+    }
+    .auth__hint {
+      font-size: 12px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--accent-faint);
+      margin-bottom: 26px;
+    }
+    .auth__form {
+      display: flex; flex-direction: column; gap: 12px;
+    }
+    .auth__label {
+      font-size: 10px;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: var(--accent-faint);
+      text-align: left;
+    }
+    .auth__input {
+      padding: 12px 16px;
+      background: rgba(255, 255, 255, 0.6);
+      border: 1px solid var(--border-soft);
+      border-radius: 12px;
+      color: var(--accent-text);
+      font: inherit;
+      font-size: 14px;
+      transition: border-color 0.25s var(--ease-out-zen),
+                  background 0.25s var(--ease-out-zen);
+    }
+    .auth__input:focus {
+      border-color: var(--accent-bright);
+      background: rgba(255, 255, 255, 0.85);
+    }
+    .auth__input[aria-invalid="true"] {
+      border-color: rgba(220, 90, 80, 0.6);
+    }
+    .auth__error {
+      font-size: 11px;
+      color: rgba(180, 60, 60, 0.85);
+      text-align: left;
+      min-height: 14px;
+      letter-spacing: 0.04em;
+    }
+    .auth .zen-btn { margin-top: 8px; align-self: stretch; }
+
+    /* ─── Leaderboard ──────────────────────────────────────────── */
+    .leaderboard { max-width: 580px; }
+    .leaderboard__header { text-align: center; margin-bottom: 28px; }
+    .leaderboard__header h1 {
+      font-size: 22px; font-weight: 300;
+      letter-spacing: 0.3em;
+      text-transform: uppercase;
+      color: var(--accent-text);
+      margin-bottom: 6px;
+    }
+    .leaderboard__subtitle {
+      font-size: 11px;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--accent-faint);
+    }
+    .leaderboard__list {
+      list-style: none;
+      display: flex; flex-direction: column;
+      gap: 4px;
+    }
+    .leaderboard__row {
+      display: grid;
+      grid-template-columns: 32px 1fr auto 28px;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 16px;
+      border-radius: 12px;
+      font-size: 13px;
+      color: var(--accent-text);
+      transition: background 0.25s var(--ease-out-zen);
+    }
+    .leaderboard__row:hover { background: rgba(255, 255, 255, 0.4); }
+    .leaderboard__row--me {
+      background: rgba(31, 95, 168, 0.10);
+      border: 1px solid rgba(31, 95, 168, 0.25);
+    }
+    .leaderboard__rank {
+      font-size: 11px;
+      letter-spacing: 0.12em;
+      color: var(--accent-faint);
+      font-variant-numeric: tabular-nums;
+    }
+    .leaderboard__name { font-weight: 500; }
+    .leaderboard__name em {
+      font-style: normal;
+      font-size: 10px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--accent-bright);
+      margin-left: 6px;
+    }
+    .leaderboard__score {
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      color: var(--accent-text);
+    }
+    .leaderboard__tier { font-size: 18px; line-height: 1; }
+    .leaderboard__empty {
+      text-align: center;
+      font-size: 12px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--accent-faint);
+      padding: 32px 0;
+    }
+
+    /* ─── Profile ──────────────────────────────────────────────── */
+    .profile { max-width: 480px; text-align: center; }
+    .profile__header { margin-bottom: 28px; }
+    .profile__header h1 {
+      font-size: 26px; font-weight: 300;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--accent-text);
+      margin-bottom: 6px;
+    }
+    .profile__email {
+      font-size: 12px;
+      color: var(--accent-faint);
+      letter-spacing: 0.06em;
+    }
+    .profile__stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 18px;
+      margin-bottom: 32px;
+    }
+    .profile__stat {
+      padding: 14px 8px;
+      border: 1px solid var(--border-soft);
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.4);
+    }
+    .profile__stat dt {
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: 0.22em;
+      color: var(--accent-faint);
+      margin-bottom: 4px;
+    }
+    .profile__stat dd {
+      font-size: 22px;
+      font-weight: 600;
+      color: var(--accent-text);
+      font-variant-numeric: tabular-nums;
+    }
+    .profile__tier {
+      display: block;
+      font-size: 11px;
+      font-weight: 400;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--accent-faint);
+      margin-top: 4px;
+    }
+    .profile__actions {
+      display: flex; gap: 12px; flex-wrap: wrap; justify-content: center;
+    }
+    .profile__empty {
+      font-size: 13px;
+      color: var(--accent-dim);
+      margin: 12px 0 24px;
+      letter-spacing: 0.06em;
+    }
+
+    /* ─── Play view ────────────────────────────────────────────── */
+    .play__canvas {
+      position: absolute; inset: 0;
+      width: 100%; height: 100%;
+      z-index: 1;
+    }
+    .play__hud {
+      position: fixed; inset: 0;
+      pointer-events: none;
+      z-index: 10;
+      user-select: none;
+    }
+    .play__hud > * { pointer-events: auto; }
+
+    /* Inline redirect notice rendered by the auth gate */
+    .page-redirect {
+      font-size: 13px;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: var(--accent-faint);
+    }
+
+    /* ─── Game Over panel — Phase 11 multi-button row ──────────── */
+    .hud-gameover__actions {
+      display: flex; flex-wrap: wrap; gap: 10px;
+      justify-content: center;
+    }
+    .hud-gameover__btn--primary {
+      background: rgba(31, 95, 168, 0.14);
+      border-color: var(--accent-bright);
+      color: var(--accent-bright);
+    }
+    .hud-gameover__btn--primary:hover {
+      background: rgba(31, 95, 168, 0.22);
+    }
+    .hud-gameover__btn--ghost {
+      border-color: var(--border-soft);
+      color: var(--accent-dim);
+    }
+
+    /* Reduced-motion: kill the landing orb breathing + nav fade */
+    @media (prefers-reduced-motion: reduce) {
+      .landing__mark-orb,
+      .app-nav { animation: none !important; }
+      .page-container { transition: none !important; }
+    }
+
+    /* Compact viewports: stack profile stats + tighten landing typography */
+    @media (max-width: 540px) {
+      .landing__title { font-size: 38px; letter-spacing: 0.28em; }
+      .profile__stats { grid-template-columns: 1fr; }
+      .glass-card { padding: 28px 22px; }
+      .app-nav { padding: 10px 16px; }
+      .app-nav__links a { padding: 6px 10px; font-size: 10px; }
+    }
+  </style>
+</head>
+<body>
+  <!-- Ambient zen breath layer — pure CSS, runs forever, no JS coupling.
+       Stays global across all routes per spec. -->
+  <div id="breath-ambient" aria-hidden="true"></div>
+
+  <!-- App page-mount target. main.js boots the router which swaps views
+       inside this container with a 0.4s opacity fade. -->
+  <div id="app" class="page-container"></div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
