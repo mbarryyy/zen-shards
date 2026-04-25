@@ -35,6 +35,11 @@ const PORTRAIT_FULL = 0.55;
  * @param {number} [opts.portraitFov]     narrow-portrait FOV in degrees (default 65)
  * @param {number} [opts.marginRatio]     fraction of frustum used for bounds (default 0.85)
  * @param {number} [opts.depth]           z-axis range, centred on 0 (default 4)
+ * @param {number} [opts.insetTopPx]      CSS-px reserved at top of viewport
+ *                                         for HUD chrome (nav + pills + lives + hint).
+ *                                         Shrinks the upper Y bound asymmetrically.
+ * @param {number} [opts.insetBottomPx]   CSS-px reserved at bottom for HUD
+ *                                         chrome (calm gauge / level pill).
  * @returns {{
  *   fov: number,
  *   aspect: number,
@@ -52,6 +57,8 @@ export function computeViewportFit(opts = {}) {
   const portraitFov = opts.portraitFov ?? DEFAULT_PORTRAIT_FOV;
   const marginRatio = clamp(opts.marginRatio ?? DEFAULT_MARGIN_RATIO, 0, 1);
   const depth = opts.depth ?? DEFAULT_DEPTH;
+  const insetTopPx = Math.max(0, opts.insetTopPx ?? 0);
+  const insetBottomPx = Math.max(0, opts.insetBottomPx ?? 0);
 
   const aspect = width / height;
   const isPortrait = width < height;
@@ -70,8 +77,21 @@ export function computeViewportFit(opts = {}) {
   // Subtract ball radius so the ball SURFACE (not just its centre) stays
   // inside the view, then apply the marginRatio safety pad on top.
   const halfX = Math.max(0.5, ((visibleWidth / 2) - ballRadiusPad) * marginRatio);
-  const halfY = Math.max(0.5, ((visibleHeight / 2) - ballRadiusPad) * marginRatio);
+  const halfYRaw = Math.max(0.5, ((visibleHeight / 2) - ballRadiusPad) * marginRatio);
   const halfZ = depth / 2;
+
+  // Convert HUD CSS-px insets into world units. The visibleHeight at the
+  // closest z corresponds to the CSS height of the canvas — so each px is
+  // worth (visibleHeight / heightPx) world units.
+  const pxToWorld = visibleHeight / height;
+  const topOffsetWorld = insetTopPx * pxToWorld;
+  const bottomOffsetWorld = insetBottomPx * pxToWorld;
+
+  // Upper bound (y_max in world space, screen TOP) shrinks by the top inset.
+  // Lower bound (y_min, screen BOTTOM) shrinks by the bottom inset.
+  // Floor each side at 0.4 so the spawn band never collapses on tiny viewports.
+  const yMax = Math.max(0.4, halfYRaw - topOffsetWorld);
+  const yMin = Math.min(-0.4, -halfYRaw + bottomOffsetWorld);
 
   return {
     fov,
@@ -81,7 +101,7 @@ export function computeViewportFit(opts = {}) {
     visibleHeight,
     bounds: {
       x: [-halfX, halfX],
-      y: [-halfY, halfY],
+      y: [yMin, yMax],
       z: [-halfZ, halfZ],
     },
   };

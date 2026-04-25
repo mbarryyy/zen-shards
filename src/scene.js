@@ -27,11 +27,21 @@ export function createScene(mount) {
   // so the same numbers feed the position generator and the camera. On
   // portrait phones this widens the FOV (45° → up to ~65°) so the scene
   // reads instead of cropping out half the balls.
+  //
+  // HUD chrome reserves vertical space:
+  //   top ≈ nav (56) + pills row (top:80) + lives (top:158) + hint (top:128)
+  //         → ~190px max; round up to 200 for safety
+  //   bottom ≈ calm gauge (22 + ~50) + level pill ~ 100px
+  // Balls won't spawn inside these strips so HUD never overlaps a ball.
   const cameraDistance = DEFAULT_CAMERA_DISTANCE;
+  const HUD_INSET_TOP_PX = 200;
+  const HUD_INSET_BOTTOM_PX = 100;
   let fit = computeViewportFit({
     width: mount.clientWidth,
     height: mount.clientHeight,
     cameraDistance,
+    insetTopPx: HUD_INSET_TOP_PX,
+    insetBottomPx: HUD_INSET_BOTTOM_PX,
   });
 
   const camera = new THREE.PerspectiveCamera(fit.fov, fit.aspect, 0.1, 100);
@@ -159,7 +169,13 @@ export function createScene(mount) {
   function onResize() {
     const w = mount.clientWidth;
     const h = mount.clientHeight;
-    fit = computeViewportFit({ width: w, height: h, cameraDistance });
+    fit = computeViewportFit({
+      width: w,
+      height: h,
+      cameraDistance,
+      insetTopPx: HUD_INSET_TOP_PX,
+      insetBottomPx: HUD_INSET_BOTTOM_PX,
+    });
     camera.aspect = fit.aspect;
     camera.fov = fit.fov;
     camera.updateProjectionMatrix();
