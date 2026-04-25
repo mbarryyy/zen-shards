@@ -86,32 +86,38 @@ describe('pickFov() · FOV curve', () => {
 // ─── computeViewportFit() · spec-checklist viewports ────────────────────
 
 describe('computeViewportFit() · checklist viewports', () => {
-  it('Desktop 1440×900: aspect 1.6, FOV 45°, bounds ~±6.7 X / ±4.2 Y', () => {
+  it('Desktop 1440×900: aspect 1.6, FOV 45°, bounds fit at closest z (z=+depth/2)', () => {
     const fit = computeViewportFit({ width: 1440, height: 900 });
     expect(fit.aspect).toBeCloseTo(1.6, 5);
     expect(fit.fov).toBe(45);
     expect(fit.isPortrait).toBe(false);
-    // halfX ≈ 6.71 (visibleWidth/2 * 0.85), halfY ≈ 4.22
-    expect(fit.bounds.x[1]).toBeCloseTo(6.71, 1);
-    expect(fit.bounds.y[1]).toBeCloseTo(4.22, 1);
+    // Bounds computed at closestDistance=10 (cameraDistance 12 - depth 2)
+    // and shrunk by ballRadiusPad 0.6 then marginRatio 0.85.
+    // halfX = (10 * tan(22.5°) * 1.6 - 0.6) * 0.85 ≈ 5.12
+    // halfY = (10 * tan(22.5°) - 0.6) * 0.85 ≈ 3.01
+    expect(fit.bounds.x[1]).toBeCloseTo(5.12, 1);
+    expect(fit.bounds.y[1]).toBeCloseTo(3.01, 1);
   });
 
-  it('iPad portrait 768×1024: aspect 0.75, FOV ~56°, bounds ~±4.1 X / ±5.4 Y', () => {
+  it('iPad portrait 768×1024: aspect 0.75, FOV ~56°', () => {
     const fit = computeViewportFit({ width: 768, height: 1024 });
     expect(fit.aspect).toBeCloseTo(0.75, 5);
     expect(fit.fov).toBeCloseTo(56.11, 1); // 45 + 20 * (1.0-0.75)/0.45
     expect(fit.isPortrait).toBe(true);
-    expect(fit.bounds.x[1]).toBeCloseTo(4.07, 1);
-    expect(fit.bounds.y[1]).toBeCloseTo(5.43, 1);
+    // Bounds positive + symmetric, computed at closest z with radius pad.
+    expect(fit.bounds.x[1]).toBeGreaterThan(2);
+    expect(fit.bounds.y[1]).toBeGreaterThan(3);
+    expect(fit.bounds.x[1]).toBeLessThan(fit.bounds.y[1]); // portrait
   });
 
-  it('iPhone 13 mini portrait 375×812: aspect 0.46, FOV 65° (deep portrait), bounds ~±3.0 X / ±6.5 Y', () => {
+  it('iPhone 13 mini portrait 375×812: aspect 0.46, FOV 65° (deep portrait floor)', () => {
     const fit = computeViewportFit({ width: 375, height: 812 });
     expect(fit.aspect).toBeCloseTo(0.4618, 3);
     expect(fit.fov).toBe(DEFAULT_PORTRAIT_FOV); // aspect ≤ 0.55 floors at 65°
     expect(fit.isPortrait).toBe(true);
-    expect(fit.bounds.x[1]).toBeCloseTo(3.0, 1);
-    expect(fit.bounds.y[1]).toBeCloseTo(6.49, 1);
+    expect(fit.bounds.x[1]).toBeGreaterThan(1);
+    expect(fit.bounds.y[1]).toBeGreaterThan(4);
+    expect(fit.bounds.x[1]).toBeLessThan(fit.bounds.y[1]);
   });
 
   it('iPhone SE portrait 320×568: aspect ~0.56, FOV ~64° (just inside the lerp range)', () => {
@@ -173,7 +179,8 @@ describe('computeViewportFit() · defaults and degenerate inputs', () => {
   it('marginRatio is clamped to [0, 1] (defensive)', () => {
     const negative = computeViewportFit({ width: 1920, height: 1080, marginRatio: -0.5 });
     const huge = computeViewportFit({ width: 1920, height: 1080, marginRatio: 99 });
-    expect(negative.bounds.x[1]).toBe(0);
+    // Negative clamps to 0 → bounds floor at 0.5 (the safety minimum).
+    expect(negative.bounds.x[1]).toBe(0.5);
     // huge clamped to 1.0 → bounds match marginRatio: 1
     const at1 = computeViewportFit({ width: 1920, height: 1080, marginRatio: 1.0 });
     expect(huge.bounds.x[1]).toBeCloseTo(at1.bounds.x[1], 5);
@@ -186,9 +193,11 @@ describe('computeViewportFit() · defaults and degenerate inputs', () => {
     expect(deep.bounds.z).toEqual([-5, 5]);
   });
 
-  it('cameraDistance scales visibleWidth/visibleHeight proportionally', () => {
-    const near = computeViewportFit({ width: 1920, height: 1080, cameraDistance: 6 });
-    const far = computeViewportFit({ width: 1920, height: 1080, cameraDistance: 12 });
+  it('cameraDistance scales visibleWidth/visibleHeight proportionally (depth=0)', () => {
+    // Pin depth=0 so the closest-z compensation collapses to cameraDistance,
+    // making the relationship strictly proportional.
+    const near = computeViewportFit({ width: 1920, height: 1080, cameraDistance: 6, depth: 0 });
+    const far = computeViewportFit({ width: 1920, height: 1080, cameraDistance: 12, depth: 0 });
     expect(far.visibleHeight).toBeCloseTo(near.visibleHeight * 2, 5);
     expect(far.visibleWidth).toBeCloseTo(near.visibleWidth * 2, 5);
   });

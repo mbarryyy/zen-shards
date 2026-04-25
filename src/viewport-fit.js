@@ -14,6 +14,9 @@ const DEFAULT_MARGIN_RATIO = 0.85; // leave room near the frustum edge so
 //                                    balls aren't clipped by the canvas
 const DEFAULT_DEPTH = 4; // z-axis range, kept symmetric around z=0
 //                          (matches the legacy ±2 from positions.js)
+const DEFAULT_BALL_RADIUS_PAD = 0.6; // safety pad for the largest ball radius
+//                                      (PRIMARY=0.55) so the ball SURFACE,
+//                                      not its centre, stays inside the view
 
 // Aspect at or above PORTRAIT_PIVOT uses baseFov; at or below
 // PORTRAIT_FULL uses portraitFov; we lerp between them so transitions
@@ -53,16 +56,21 @@ export function computeViewportFit(opts = {}) {
   const aspect = width / height;
   const isPortrait = width < height;
   const fov = pickFov(aspect, baseFov, portraitFov);
+  const ballRadiusPad = opts.ballRadiusPad ?? DEFAULT_BALL_RADIUS_PAD;
 
-  // Standard perspective frustum height at a given distance, derived from
-  // tan(fov/2). Width follows aspect so the bounds match exactly what the
-  // camera sees (modulo the marginRatio safety margin).
+  // Compute the visible frustum at the *closest* z a ball can occupy
+  // (cameraDistance - depth/2). At z = +depth/2 the ball is closer to the
+  // camera than the canonical z=0 plane, so the visible area is smaller —
+  // use that worst-case so balls at any depth fit on screen.
+  const closestDistance = Math.max(0.1, cameraDistance - depth / 2);
   const visibleHeight =
-    2 * Math.tan(((fov / 2) * Math.PI) / 180) * cameraDistance;
+    2 * Math.tan(((fov / 2) * Math.PI) / 180) * closestDistance;
   const visibleWidth = visibleHeight * aspect;
 
-  const halfX = (visibleWidth / 2) * marginRatio;
-  const halfY = (visibleHeight / 2) * marginRatio;
+  // Subtract ball radius so the ball SURFACE (not just its centre) stays
+  // inside the view, then apply the marginRatio safety pad on top.
+  const halfX = Math.max(0.5, ((visibleWidth / 2) - ballRadiusPad) * marginRatio);
+  const halfY = Math.max(0.5, ((visibleHeight / 2) - ballRadiusPad) * marginRatio);
   const halfZ = depth / 2;
 
   return {
@@ -100,6 +108,7 @@ export {
   DEFAULT_CAMERA_DISTANCE,
   DEFAULT_MARGIN_RATIO,
   DEFAULT_DEPTH,
+  DEFAULT_BALL_RADIUS_PAD,
   PORTRAIT_PIVOT,
   PORTRAIT_FULL,
 };

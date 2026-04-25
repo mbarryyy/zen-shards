@@ -30,6 +30,7 @@ import {
   DEFAULT_BASE_FOV,
   DEFAULT_PORTRAIT_FOV,
 } from '../src/viewport-fit.js';
+import { generatePositions } from '../src/positions.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const HTML = readFileSync(resolve(here, '..', 'index.html'), 'utf8');
@@ -453,6 +454,44 @@ describe('M5 · notch simulation + reduced-motion combined sanity', () => {
     const sceneSrc = readFileSync(resolve(here, '..', 'src', 'scene.js'), 'utf8');
     expect(sceneSrc).toMatch(/window\.addEventListener\(\s*['"]orientationchange['"]/);
     expect(sceneSrc).toMatch(/window\.removeEventListener\(\s*['"]orientationchange['"]/);
+  });
+});
+
+// ─── M2 ↔ positions.js end-to-end: viewport-fit bounds keep balls in frame ─
+
+describe('M5 · M2 ↔ positions.js contract: every spawn lands inside the live viewport bounds', () => {
+  // Feed each grid viewport's computeViewportFit result into generatePositions
+  // and assert no position drifts outside the bounds. This is the live chain
+  // play.js exercises every round — locks the contract end-to-end so a future
+  // refactor of either module can't silently let balls clip off-canvas.
+  for (const v of GRID) {
+    it(`${v.label}: 12 generated balls all land inside fit.bounds`, () => {
+      const fit = computeViewportFit({ width: v.width, height: v.height });
+      // Deterministic RNG so the test is stable.
+      let seed = 1;
+      const rng = () => ((seed = (seed * 9301 + 49297) % 233280) / 233280);
+      const positions = generatePositions(12, { bounds: fit.bounds, rng });
+      expect(positions.length).toBe(12);
+      for (const p of positions) {
+        expect(p.x, `${v.label}: x outside [${fit.bounds.x[0]}, ${fit.bounds.x[1]}]`)
+          .toBeGreaterThanOrEqual(fit.bounds.x[0]);
+        expect(p.x).toBeLessThanOrEqual(fit.bounds.x[1]);
+        expect(p.y, `${v.label}: y outside [${fit.bounds.y[0]}, ${fit.bounds.y[1]}]`)
+          .toBeGreaterThanOrEqual(fit.bounds.y[0]);
+        expect(p.y).toBeLessThanOrEqual(fit.bounds.y[1]);
+        expect(p.z).toBeGreaterThanOrEqual(fit.bounds.z[0]);
+        expect(p.z).toBeLessThanOrEqual(fit.bounds.z[1]);
+      }
+    });
+  }
+
+  it('portrait phone bounds are tighter on X than desktop bounds (the whole point of M2)', () => {
+    const desktop = computeViewportFit({ width: 1440, height: 900 });
+    const portrait = computeViewportFit({ width: 375, height: 812 });
+    expect(portrait.bounds.x[1]).toBeLessThan(desktop.bounds.x[1]);
+    // And portrait Y is taller than desktop Y on tall phones — confirms the
+    // visible-volume reshapes correctly when the user rotates to portrait.
+    expect(portrait.bounds.y[1]).toBeGreaterThan(desktop.bounds.y[1]);
   });
 });
 
