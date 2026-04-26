@@ -70,6 +70,75 @@ describe('pickSplitChildCount', () => {
   });
 });
 
+// ─── pickSplitChildCount — { deterministic } opt (refined spec) ────────────
+//
+// The refined difficulty design adds a `deterministic` flag so r4–7 callers
+// can pin childCount to 2 (no luck-driven 33% "extra third child") while r8+
+// callers keep the random 2-or-3 behavior. Tests assert both paths and
+// verify the flag short-circuits before consuming any RNG output.
+
+describe('pickSplitChildCount — { deterministic } flag', () => {
+  it('depth 1 with deterministic:true ALWAYS returns 2 (no rng roll)', () => {
+    // Drive 100 different seeds — the random branch would land on 3 some of
+    // the time; deterministic:true must override every roll.
+    for (let s = 0; s < 100; s++) {
+      const n = pickSplitChildCount(1, mulberry32(s), { deterministic: true });
+      expect(n).toBe(2);
+    }
+  });
+
+  it('depth 1 with deterministic:true does not consume the rng', () => {
+    // Hard guarantee: the deterministic short-circuit must NOT advance the
+    // rng pointer, otherwise callers downstream of pickSplitChildCount would
+    // get different rolls depending on the flag — that breaks seeded tests.
+    let calls = 0;
+    const rng = () => {
+      calls += 1;
+      return 0.0; // would always trigger the "3 children" branch
+    };
+    pickSplitChildCount(1, rng, { deterministic: true });
+    expect(calls).toBe(0);
+  });
+
+  it('depth 1 with deterministic:false matches the legacy random behavior (~33% threes)', () => {
+    let threes = 0;
+    const N = 1000;
+    for (let s = 0; s < N; s++) {
+      if (pickSplitChildCount(1, mulberry32(s), { deterministic: false }) === 3) threes++;
+    }
+    expect(threes / N).toBeGreaterThan(0.25);
+    expect(threes / N).toBeLessThan(0.42);
+  });
+
+  it('omitting opts is identical to deterministic:false (backward compat)', () => {
+    // Existing callers (and the existing legacy test above) pass no opts —
+    // this is the same as the refined "r8+" path. Guard against accidental
+    // contract drift on the opts default.
+    let withFlag = 0;
+    let withoutFlag = 0;
+    const N = 500;
+    for (let s = 0; s < N; s++) {
+      if (pickSplitChildCount(1, mulberry32(s), { deterministic: false }) === 3) withFlag++;
+      if (pickSplitChildCount(1, mulberry32(s)) === 3) withoutFlag++;
+    }
+    // Must agree exactly when seeded identically — same rolls, same outcomes.
+    expect(withFlag).toBe(withoutFlag);
+  });
+
+  it('depth 2 with deterministic:true also returns 2 (depth>=2 short-circuit)', () => {
+    // The depth>=2 short-circuit is independent of the deterministic flag.
+    expect(pickSplitChildCount(2, mulberry32(1), { deterministic: true })).toBe(2);
+    expect(pickSplitChildCount(99, mulberry32(1), { deterministic: true })).toBe(2);
+  });
+
+  it('depth 2 with deterministic:false also returns 2 (cap dominates)', () => {
+    // Even with the random path enabled, depth>=2 always caps at 2.
+    for (let s = 0; s < 30; s++) {
+      expect(pickSplitChildCount(2, mulberry32(s), { deterministic: false })).toBe(2);
+    }
+  });
+});
+
 // ─── childKindForDepth ──────────────────────────────────────────────────────
 
 describe('childKindForDepth', () => {

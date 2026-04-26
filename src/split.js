@@ -9,11 +9,24 @@ import { BallKind } from './ball.js';
 
 /**
  * Number of children spawned by a single split, given depth + rng.
- * - depth 1 splits: 2 or 3 children (most rounds 2; ~33% chance of 3).
- * - depth 2 splits: always 2 children (keep total ball count manageable).
+ * - depth >= 2 splits: always 2 children (keeps total ball count manageable).
+ * - depth 1 splits:
+ *     * `opts.deterministic` true  → always 2 children (no RNG roll).
+ *     * `opts.deterministic` false → 2 or 3 children (~33% chance of 3).
+ *
+ * The deterministic flag is used at early split rounds (r4–7 in the difficulty
+ * spec) to remove the luck-driven "+1 click" variance that the design doc
+ * flags as violating Hunicke's DDA invisibility principle: the player should
+ * be advancing on skill, not on whether RNG flipped a 33% coin behind their
+ * back. From r8+ the caller passes `deterministic: false` to restore the
+ * 33% chance of 3 — by then the player has a stable schema.
+ *
+ * Backward compatible: omitting `opts` keeps the old random-at-depth-1
+ * behavior so existing callers (and tests) continue to work.
  */
-export function pickSplitChildCount(depth, rng = Math.random) {
+export function pickSplitChildCount(depth, rng = Math.random, opts = {}) {
   if (depth >= 2) return 2;
+  if (opts.deterministic) return 2;
   return rng() < 0.33 ? 3 : 2;
 }
 

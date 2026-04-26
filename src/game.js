@@ -417,13 +417,25 @@ export class GameState extends Emitter {
     }
 
     // Decide which children themselves will split.
+    //
+    // Difficulty refinement: replace the old deterministic "always 1 nested
+    // child from r8 onward" rule with a probability ramp:
+    //   r8–9   : 50%  → on average half of depth-1 splits cascade
+    //   r10–11 : 75%
+    //   r12+   : 100% (matches the previous always-on behavior at high rounds)
+    // This softens the +7-max-clicks cliff that used to land on r8 in one
+    // jump. The roll uses this.rng() so seeded tests stay deterministic.
     let willSplitChildren = opts.childWillSplit;
     if (willSplitChildren === undefined) {
       const nextDepth = childDepth + 1;
       if (nextDepth <= this._difficulty.maxSplitDepth && childIds.length > 0) {
-        // Spec: at deeper rounds we get cascading splits — pick 1 child.
-        const chosen = pickWillSplit(childIds, 1, this.rng);
-        willSplitChildren = [...chosen];
+        const nestProb = this._difficulty.nestingProbability ?? 1;
+        if (this.rng() < nestProb) {
+          const chosen = pickWillSplit(childIds, 1, this.rng);
+          willSplitChildren = [...chosen];
+        } else {
+          willSplitChildren = [];
+        }
       } else {
         willSplitChildren = [];
       }
@@ -515,7 +527,12 @@ export class GameState extends Emitter {
   // ─── internals ────────────────────────────────────────────────────────
 
   _beginSplit(parentBallId, parentDepth) {
-    const childCount = pickSplitChildCount(parentDepth + 1, this.rng);
+    // Difficulty refinement: r4–7 force a deterministic 2-child split (no
+    // 33% "lucky 3rd" variance), r8+ restore the random 2-or-3 behavior so
+    // the player gets a stable schema before facing RNG noise.
+    const childCount = pickSplitChildCount(parentDepth + 1, this.rng, {
+      deterministic: this.round < DIFFICULTY.SECOND_LAYER_SPLIT_ROUND,
+    });
     this._pendingSplit = {
       parentBallId,
       depth: parentDepth + 1,

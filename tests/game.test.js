@@ -506,11 +506,30 @@ describe('split mechanic — willSplit selection', () => {
     }
   });
 
-  it('round 8 with 5 balls picks 2 willSplit ids (per spec §4)', () => {
+  it('round 8 with 5 balls picks 1 willSplit id (refined: bump moved to r10)', () => {
+    // Refined spec §3.3: r8 introduces depth-2 NESTING but keeps splitCount=1
+    // so the two new mechanics (nesting + more splits) are decoupled. The
+    // splitCount=2 bump moved from r8 → r10.
     const g = new GameState({ rng: mulberry32(11) });
     g.startRound(8, [1, 2, 3, 4, 5]);
     const flagged = [1, 2, 3, 4, 5].filter((id) => g.isWillSplit(id));
+    expect(flagged).toHaveLength(1);
+  });
+
+  it('round 10 with 5 balls picks 2 willSplit ids (refined: was r8)', () => {
+    // The r8→r10 bump is what frees the r8 plateau for "nesting only" — pin
+    // its new home so a future regression on splitCountForRound surfaces here.
+    const g = new GameState({ rng: mulberry32(11) });
+    g.startRound(10, [1, 2, 3, 4, 5]);
+    const flagged = [1, 2, 3, 4, 5].filter((id) => g.isWillSplit(id));
     expect(flagged).toHaveLength(2);
+  });
+
+  it('round 12 with 5 balls picks 3 willSplit ids', () => {
+    const g = new GameState({ rng: mulberry32(11) });
+    g.startRound(12, [1, 2, 3, 4, 5]);
+    const flagged = [1, 2, 3, 4, 5].filter((id) => g.isWillSplit(id));
+    expect(flagged).toHaveLength(3);
   });
 
   it('roundStart event payload includes willSplitIds (subset of ballIds)', () => {
@@ -797,36 +816,53 @@ describe('split mechanic — recursive splits at high rounds', () => {
     expect(g.isWillSplit(102)).toBe(false);
   });
 
-  it('round 8 (maxSplitDepth=2): exactly one depth-1 child is auto-marked willSplit', () => {
-    const g = new GameState({ rng: mulberry32(11) });
-    g.startRound(8, [1, 2, 3, 4, 5]);
-    drainReveal(g);
-    // Walk to first willSplit ball
-    let firstSplit = null;
-    while (firstSplit === null) {
-      const id = g.sequence[g.recallCursor];
-      if (g.isWillSplit(id)) firstSplit = id;
-      else g.handleClick(id);
-    }
-    g.handleClick(firstSplit);
-    expect(g.phase).toBe(Phase.SPLIT_REVEAL);
-    g.acceptSplitChildren(firstSplit, [201, 202, 203]);
-    // One of the three children should be flagged willSplit (depth 1 → can recurse).
-    const childFlags = [201, 202, 203].filter((id) => g.isWillSplit(id));
-    expect(childFlags).toHaveLength(1);
-    // All three are recorded at depth 1.
-    for (const id of [201, 202, 203]) {
-      expect(g.splitDepthOf(id)).toBe(1);
-    }
-  });
-
-  it('round 8 explicit childWillSplit option overrides the auto-pick', () => {
-    // Suppress the helpful "expected 3 children, got 2" warning from game.js —
-    // the test intentionally feeds 2 children to keep the scenario small.
+  it('round 12 (maxSplitDepth=2, nestProb=1.0): auto-pick marks exactly one depth-1 child', () => {
+    // Original test ran at r=8 and asserted "exactly one depth-1 child is
+    // auto-marked willSplit". Under the refined spec, r=8 nesting is 50%
+    // probabilistic — the deterministic "exactly one" guarantee now lives at
+    // r≥12 where nestingProbability = 1.0. This test preserves the original
+    // intent (auto-pick caps at 1 child when nesting fires) at the new round
+    // where the contract is unconditional. (The probabilistic path at r8/9
+    // and r10/11 is covered separately by the
+    // "probabilistic nesting" describe block below.)
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
       const g = new GameState({ rng: mulberry32(11) });
-      g.startRound(8, [1, 2, 3, 4, 5]);
+      g.startRound(12, [1, 2, 3, 4, 5, 6]);
+      drainReveal(g);
+      // Walk to first willSplit ball.
+      let firstSplit = null;
+      while (firstSplit === null) {
+        const id = g.sequence[g.recallCursor];
+        if (g.isWillSplit(id)) firstSplit = id;
+        else g.handleClick(id);
+      }
+      g.handleClick(firstSplit);
+      expect(g.phase).toBe(Phase.SPLIT_REVEAL);
+      g.acceptSplitChildren(firstSplit, [201, 202, 203]);
+      // Exactly one of the three children is flagged willSplit (auto-pick
+      // capped at 1 — the nesting probability at r12 is 100%).
+      const childFlags = [201, 202, 203].filter((id) => g.isWillSplit(id));
+      expect(childFlags).toHaveLength(1);
+      // All three are recorded at depth 1.
+      for (const id of [201, 202, 203]) {
+        expect(g.splitDepthOf(id)).toBe(1);
+      }
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('round 12 explicit childWillSplit option overrides the auto-pick', () => {
+    // Same scenario as the round 8 override test we used to have, ported to
+    // r12 so the auto-pick we are overriding is deterministic (100% nest).
+    // The test intentionally feeds 2 children — game.js logs a "got 2,
+    // expected 2-or-3" warning sometimes; we suppress it to keep test output
+    // clean.
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const g = new GameState({ rng: mulberry32(11) });
+      g.startRound(12, [1, 2, 3, 4, 5, 6]);
       drainReveal(g);
       let firstSplit = null;
       while (firstSplit === null) {
@@ -997,5 +1033,188 @@ describe('split mechanic — correctClick payload includes depth + willSplit', (
     expect(fn).toHaveBeenCalledWith(
       expect.objectContaining({ ballId: childToClick, depth: 1, willSplit: false }),
     );
+  });
+});
+
+// ─── Refined difficulty: split-childCount determinism (r4–7 vs r8+) ────────
+//
+// The refined design wires `pickSplitChildCount`'s `deterministic` flag to
+// `round < SECOND_LAYER_SPLIT_ROUND` inside `_beginSplit`. r4–7 callers
+// therefore get a fixed 2-child split (no luck-driven 3rd child); r8+
+// callers restore the legacy ~33% chance of 3. Tests cover both branches at
+// the integration level (game → split.js).
+
+describe('split mechanic — refined child-count contract (r4–7 deterministic)', () => {
+  // Helper: drive a game to splitRequested for `round` and report the
+  // emitted childCount. Uses an rng that *would* roll 3 (rng()=0) to verify
+  // the deterministic flag suppresses the lucky-third path.
+  function childCountFor(round, ballIds, rngFactory) {
+    const g = new GameState({ rng: rngFactory() });
+    g.startRound(round, ballIds);
+    drainReveal(g);
+    const splitId = ballIds.find((id) => g.isWillSplit(id));
+    if (!splitId) return null; // no split picked at this round (shouldn't happen for r≥4)
+    while (g.sequence[g.recallCursor] !== splitId) {
+      g.handleClick(g.sequence[g.recallCursor]);
+    }
+    let payload;
+    g.on('splitRequested', (p) => {
+      payload = p;
+    });
+    g.handleClick(splitId);
+    return payload?.childCount ?? null;
+  }
+
+  it('round 4 always produces 2 children — even with rng that would roll 3', () => {
+    // 25 different seeds: every one must give 2 children at r4 (deterministic).
+    for (let seed = 1; seed <= 25; seed++) {
+      const n = childCountFor(4, [10, 20, 30], () => mulberry32(seed));
+      expect(n).toBe(2);
+    }
+  });
+
+  it('rounds 5, 6, 7 all produce exactly 2 children regardless of rng', () => {
+    for (const round of [5, 6, 7]) {
+      for (let seed = 1; seed <= 25; seed++) {
+        // r5/6/7 use 4-ball sets per refined ballCount table — but tests
+        // pass arbitrary id arrays, sized to ensure splitCount=1 picks one.
+        const ids = [10, 20, 30, 40];
+        const n = childCountFor(round, ids, () => mulberry32(seed));
+        expect(n).toBe(2);
+      }
+    }
+  });
+
+  it('round 8 (boundary): childCount distribution restores ~33% threes (200 trials, ±5%)', () => {
+    // r8 is the first round where `deterministic: false` is passed to
+    // pickSplitChildCount. Verify the random branch is in play with a tight
+    // distribution check.
+    let threes = 0;
+    const N = 200;
+    for (let seed = 0; seed < N; seed++) {
+      const n = childCountFor(8, [10, 20, 30, 40, 50], () => mulberry32(seed));
+      if (n === 3) threes += 1;
+    }
+    const rate = threes / N;
+    // ~33% target with ±~8% tolerance — generous enough to absorb the small
+    // sample noise from 200 trials but tight enough to fail if the
+    // deterministic branch silently leaks into r8.
+    expect(rate).toBeGreaterThan(0.22);
+    expect(rate).toBeLessThan(0.42);
+  });
+
+  it('round 9 also uses the random branch (childCount sometimes equals 3)', () => {
+    // Lighter assertion than the r8 distribution test — just verify that 3
+    // is achievable at r9, i.e. the deterministic flag is OFF at r9.
+    let everThree = false;
+    for (let seed = 0; seed < 100 && !everThree; seed++) {
+      const n = childCountFor(9, [10, 20, 30, 40, 50], () => mulberry32(seed));
+      if (n === 3) everThree = true;
+    }
+    expect(everThree).toBe(true);
+  });
+});
+
+// ─── Refined difficulty: probabilistic nesting (r8–9 / r10–11 / r12+) ──────
+//
+// `acceptSplitChildren` rolls `this.rng() < nestingProbability` to decide
+// whether ONE depth-1 child gets auto-flagged willSplit. Tests use seeded
+// mulberry32 over many trials and assert distribution within ±5% of the
+// target rate. Each trial recreates the game from scratch so the rng state
+// is reproducible per seed.
+
+describe('split mechanic — probabilistic nesting (refined difficulty)', () => {
+  // One trial: spin up a game at `round`, walk to the first willSplit ball,
+  // click it, accept 3 children, return whether ANY child was auto-flagged.
+  function nestTrial(round, seed, ballCount = 5) {
+    const g = new GameState({ rng: mulberry32(seed) });
+    const ids = Array.from({ length: ballCount }, (_, i) => i + 1);
+    g.startRound(round, ids);
+    drainReveal(g);
+    let splitId = null;
+    while (splitId === null) {
+      const id = g.sequence[g.recallCursor];
+      if (g.isWillSplit(id)) splitId = id;
+      else g.handleClick(id);
+    }
+    g.handleClick(splitId);
+    // Pass exactly 2 children — whatever pickSplitChildCount rolled, we
+    // satisfy at least the deterministic case (childCount===2) and let the
+    // game.js mismatch warning for childCount===3 surface harmlessly.
+    const children = [201, 202];
+    // Suppress the "got 2, expected 3" wiring-drift warning that
+    // game.acceptSplitChildren prints when our static child count doesn't
+    // match a r8+ random roll of 3.
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      g.acceptSplitChildren(splitId, children);
+    } finally {
+      warnSpy.mockRestore();
+    }
+    return children.some((c) => g.isWillSplit(c)) ? 1 : 0;
+  }
+
+  function nestRate(round, trials = 200, ballCount = 5) {
+    let nested = 0;
+    for (let s = 0; s < trials; s++) nested += nestTrial(round, s, ballCount);
+    return nested / trials;
+  }
+
+  it('rounds 4–7: NEVER nest (depth-2 not unlocked, nestingProbability=0)', () => {
+    // Hard contract: no rng roll, no nested children at any seed.
+    for (const round of [4, 5, 6, 7]) {
+      for (let seed = 0; seed < 50; seed++) {
+        expect(nestTrial(round, seed, 4)).toBe(0);
+      }
+    }
+  });
+
+  it('round 8: nests in ~50% of trials (200 seeds, target 0.50 ± 0.07)', () => {
+    const rate = nestRate(8, 200, 5);
+    expect(rate).toBeGreaterThan(0.43);
+    expect(rate).toBeLessThan(0.57);
+  });
+
+  it('round 9: nests in ~50% of trials (200 seeds, target 0.50 ± 0.07)', () => {
+    const rate = nestRate(9, 200, 5);
+    expect(rate).toBeGreaterThan(0.43);
+    expect(rate).toBeLessThan(0.57);
+  });
+
+  it('round 10: nests in ~75% of trials (200 seeds, target 0.75 ± 0.07)', () => {
+    const rate = nestRate(10, 200, 5);
+    expect(rate).toBeGreaterThan(0.68);
+    expect(rate).toBeLessThan(0.82);
+  });
+
+  it('round 11: nests in ~75% of trials (200 seeds, target 0.75 ± 0.07)', () => {
+    const rate = nestRate(11, 200, 5);
+    expect(rate).toBeGreaterThan(0.68);
+    expect(rate).toBeLessThan(0.82);
+  });
+
+  it('round 12: nests in 100% of trials (deterministic — was the old r8+ rule)', () => {
+    // r12+ is the new home of "always nest". 100/100 trials must nest.
+    const N = 100;
+    let nested = 0;
+    for (let s = 0; s < N; s++) nested += nestTrial(12, s, 6);
+    expect(nested).toBe(N);
+  });
+
+  it('round 13+: nests in 100% of trials (continues capped behavior)', () => {
+    const N = 80;
+    let nested = 0;
+    for (let s = 0; s < N; s++) nested += nestTrial(15, s, 7);
+    expect(nested).toBe(N);
+  });
+
+  it('nesting roll uses this.rng (seeded determinism preserved)', () => {
+    // Same seed → same nesting outcome. Two fresh games at the same round
+    // and seed must agree on whether a nest occurred.
+    for (let seed = 0; seed < 20; seed++) {
+      const a = nestTrial(10, seed, 5);
+      const b = nestTrial(10, seed, 5);
+      expect(a).toBe(b);
+    }
   });
 });
